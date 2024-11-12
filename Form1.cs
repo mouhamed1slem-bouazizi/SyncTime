@@ -44,9 +44,11 @@ namespace SyncTime
         private List<ClientInfo> clients = new List<ClientInfo>();
         private DataGridView gridView;
         private Button syncButton;
+        private Button executeCodeButton;
         private Label statusLabel;
         private TableLayoutPanel mainLayout;
         private ComboBox fileSelector;
+        private DataGridViewRow selectedRow;
 
         public Form1()
         {
@@ -65,7 +67,7 @@ namespace SyncTime
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4, // Added one more row for the ComboBox
+                RowCount = 4,
                 Padding = new Padding(10),
                 AutoSize = true
             };
@@ -145,7 +147,9 @@ namespace SyncTime
                 AllowUserToDeleteRows = false,
                 ReadOnly = true,
                 BackgroundColor = SystemColors.Control,
-                BorderStyle = BorderStyle.Fixed3D
+                BorderStyle = BorderStyle.Fixed3D,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false
             };
 
             // Initialize columns
@@ -164,12 +168,24 @@ namespace SyncTime
 
             gridPanel.Controls.Add(gridView);
 
+            // Add selection change handler for the grid
+            gridView.CellClick += GridView_CellClick;
+
             // Button Panel
             Panel buttonPanel = new Panel
             {
                 Dock = DockStyle.Fill
             };
             mainLayout.Controls.Add(buttonPanel, 0, 3);
+
+            // Create a TableLayoutPanel for the buttons
+            TableLayoutPanel buttonsLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 1
+            };
+            buttonPanel.Controls.Add(buttonsLayout);
 
             // Sync Button
             syncButton = new Button
@@ -181,21 +197,23 @@ namespace SyncTime
             };
             syncButton.Click += SyncButton_Click;
 
-            // Center the button
-            syncButton.Location = new Point(
-                (buttonPanel.Width - syncButton.Width) / 2,
-                (buttonPanel.Height - syncButton.Height) / 2
-            );
-            buttonPanel.Controls.Add(syncButton);
-
-            // Handle button panel resize
-            buttonPanel.Resize += (s, e) =>
+            // Execute Code Button
+            executeCodeButton = new Button
             {
-                syncButton.Location = new Point(
-                    (buttonPanel.Width - syncButton.Width) / 2,
-                    (buttonPanel.Height - syncButton.Height) / 2
-                );
+                Text = "Execute Code",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
             };
+            executeCodeButton.Click += ExecuteCodeButton_Click;
+
+            // Add buttons to the layout
+            buttonsLayout.Controls.Add(syncButton, 0, 0);
+            buttonsLayout.Controls.Add(executeCodeButton, 1, 0);
+
+            // Center the buttons in their cells
+            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
             // Style the grid
             gridView.EnableHeadersVisualStyles = false;
@@ -210,6 +228,195 @@ namespace SyncTime
             statusLabel.Text = "Please select a FIDS system";
         }
 
+        private void GridView_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0)
+            {
+                selectedRow = gridView.Rows[e.RowIndex];
+                executeCodeButton.Enabled = true;
+            }
+        }
+
+        private async void ExecuteCodeButton_Click(object sender, EventArgs e)
+        {
+            if (selectedRow == null) return;
+
+            string clientName = selectedRow.Cells[0].Value.ToString();
+            string clientIP = selectedRow.Cells[1].Value.ToString();
+
+            // Create and configure the input dialog
+            Form promptForm = new Form()
+            {
+                Width = 800,
+                Height = 600,
+                FormBorderStyle = FormBorderStyle.Sizable,
+                Text = $"Execute Code on {clientName} ({clientIP})",
+                StartPosition = FormStartPosition.CenterParent,
+                MinimumSize = new Size(600, 400)
+            };
+
+            TableLayoutPanel mainPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                Padding = new Padding(10)
+            };
+
+            // Command input box
+            TextBox commandBox = new TextBox()
+            {
+                Multiline = true,
+                Height = 80,
+                Dock = DockStyle.Fill,
+                ScrollBars = ScrollBars.Vertical
+            };
+
+            // Results box
+            TextBox resultsBox = new TextBox()
+            {
+                Multiline = true,
+                ReadOnly = true,
+                Dock = DockStyle.Fill,
+                ScrollBars = ScrollBars.Both,
+                BackColor = Color.Black,
+                ForeColor = Color.LightGreen,
+                Font = new Font("Consolas", 10)
+            };
+
+            // Buttons panel
+            TableLayoutPanel buttonPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1
+            };
+
+            Button executeButton = new Button()
+            {
+                Text = "Execute",
+                Width = 100,
+                Height = 30,
+                Anchor = AnchorStyles.None
+            };
+
+            Button clearButton = new Button()
+            {
+                Text = "Clear Results",
+                Width = 100,
+                Height = 30,
+                Anchor = AnchorStyles.None
+            };
+
+            Button closeButton = new Button()
+            {
+                Text = "Close Session",
+                Width = 100,
+                Height = 30,
+                Anchor = AnchorStyles.None
+            };
+
+            // Configure layout
+            mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));  // Command box
+            mainPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));   // Results box
+            mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));   // Buttons
+
+            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+            buttonPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
+
+            // Add controls
+            mainPanel.Controls.Add(commandBox, 0, 0);
+            mainPanel.Controls.Add(resultsBox, 0, 1);
+            mainPanel.Controls.Add(buttonPanel, 0, 2);
+
+            buttonPanel.Controls.Add(executeButton, 0, 0);
+            buttonPanel.Controls.Add(clearButton, 1, 0);
+            buttonPanel.Controls.Add(closeButton, 2, 0);
+
+            promptForm.Controls.Add(mainPanel);
+
+            // Create SSH client
+            SshClient sshClient = null;
+            bool isConnected = false;
+
+            // Connect to client
+            try
+            {
+                UpdateGridRow(clientName, clientIP, "Connecting...");
+                var ping = new Ping();
+                var reply = await ping.SendPingAsync(clientIP, 1000);
+
+                if (reply.Status != IPStatus.Success)
+                {
+                    UpdateGridRow(clientName, clientIP, "Unreachable");
+                    MessageBox.Show("Client is unreachable.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                sshClient = new SshClient(clientIP, "root", "123456");
+                await Task.Run(() => sshClient.Connect());
+                isConnected = true;
+                UpdateGridRow(clientName, clientIP, "Connected");
+                resultsBox.AppendText("Connected to " + clientIP + "\r\n");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to connect: {ex.Message}", "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateGridRow(clientName, clientIP, "Connection Failed");
+                return;
+            }
+
+            // Handle execute button click
+            executeButton.Click += async (s, ev) =>
+            {
+                if (!isConnected || sshClient == null) return;
+
+                string command = commandBox.Text.Trim();
+                if (string.IsNullOrEmpty(command)) return;
+
+                try
+                {
+                    resultsBox.AppendText($"\r\n> {command}\r\n");
+                    var result = await Task.Run(() => sshClient.RunCommand(command).Result);
+                    resultsBox.AppendText($"{result}\r\n");
+                    commandBox.Clear();
+                }
+                catch (Exception ex)
+                {
+                    resultsBox.AppendText($"Error: {ex.Message}\r\n");
+                }
+            };
+
+            // Handle clear button click
+            clearButton.Click += (s, ev) =>
+            {
+                resultsBox.Clear();
+            };
+
+            // Handle close button click
+            closeButton.Click += (s, ev) =>
+            {
+                promptForm.Close();
+            };
+
+            // Handle form closing
+            promptForm.FormClosing += (s, ev) =>
+            {
+                if (isConnected && sshClient != null)
+                {
+                    sshClient.Disconnect();
+                    sshClient.Dispose();
+                }
+                UpdateGridRow(clientName, clientIP, "Disconnected");
+            };
+
+            // Enable/disable buttons based on connection status
+            executeButton.Enabled = isConnected;
+
+            // Show the form
+            promptForm.ShowDialog();
+        }
         private async void FileSelector_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (fileSelector.SelectedItem == null) return;
