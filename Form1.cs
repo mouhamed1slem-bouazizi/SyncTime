@@ -17,6 +17,8 @@ namespace SyncTime
     {
         public string Name { get; set; }
         public string IP { get; set; }
+        public string MacAddress { get; set; }
+        public string ActualMacAddress { get; set; }
     }
 
     public partial class Form1 : Form
@@ -49,11 +51,15 @@ namespace SyncTime
         private TableLayoutPanel mainLayout;
         private ComboBox fileSelector;
         private DataGridViewRow selectedRow;
+        private TextBox searchBox;
+        private ComboBox filterColumn;
+        private Panel searchAndFilterPanel; // New panel for search controls
 
         public Form1()
         {
             InitializeComponent();
             InitializeUI();
+            AddSearchAndFilter();  // Search and filter controls
         }
 
         private void InitializeUI()
@@ -155,18 +161,102 @@ namespace SyncTime
             // Initialize columns
             gridView.Columns.Add("Name", "Client Name");
             gridView.Columns.Add("IP", "IP Address");
+            gridView.Columns.Add("MAC", "MAC Address");
+            gridView.Columns.Add("ActualMAC", "Actual MAC");
             gridView.Columns.Add("Status", "Status");
             gridView.Columns.Add("CurrentTime", "Current Time");
             gridView.Columns.Add("LastSync", "Last Sync Time");
 
             // Set column weights
-            gridView.Columns[0].FillWeight = 20;
-            gridView.Columns[1].FillWeight = 20;
-            gridView.Columns[2].FillWeight = 15;
-            gridView.Columns[3].FillWeight = 22.5F;
-            gridView.Columns[4].FillWeight = 22.5F;
+            gridView.Columns[0].FillWeight = 15;  // Name
+            gridView.Columns[1].FillWeight = 15;  // IP
+            gridView.Columns[2].FillWeight = 15;  // MAC
+            gridView.Columns[3].FillWeight = 15;  // Actual MAC
+            gridView.Columns[4].FillWeight = 10;  // Status
+            gridView.Columns[5].FillWeight = 15;  // Current Time
+            gridView.Columns[6].FillWeight = 15;  // Last Sync
 
             gridPanel.Controls.Add(gridView);
+
+            // Add MAC address copy functionality
+            gridView.CellClick += (sender, e) =>
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex == 3)
+                {
+                    var macAddress = gridView.Rows[e.RowIndex].Cells[3].Value?.ToString();
+                    if (!string.IsNullOrEmpty(macAddress) && macAddress != "-")
+                    {
+                        try
+                        {
+                            Clipboard.SetText(macAddress);
+
+                            var originalColor = gridView.Rows[e.RowIndex].Cells[3].Style.BackColor;
+                            gridView.Rows[e.RowIndex].Cells[3].Style.BackColor = Color.Yellow;
+
+                            var tooltip = new ToolTip();
+                            var relativeMousePos = gridView.PointToClient(Cursor.Position);
+                            tooltip.Show("MAC Address Copied!", gridView, relativeMousePos.X + 15, relativeMousePos.Y, 1000);
+
+                            Task.Delay(200).ContinueWith(t =>
+                            {
+                                if (gridView.InvokeRequired)
+                                {
+                                    gridView.Invoke(new Action(() =>
+                                    {
+                                        gridView.Rows[e.RowIndex].Cells[3].Style.BackColor = originalColor;
+                                    }));
+                                }
+                                else
+                                {
+                                    gridView.Rows[e.RowIndex].Cells[3].Style.BackColor = originalColor;
+                                }
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Failed to copy MAC address: {ex.Message}", "Copy Error",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            };
+
+            // Add cell formatting for MAC address column
+            gridView.CellFormatting += (sender, e) =>
+            {
+                if (e.ColumnIndex == 3 && e.RowIndex >= 0)
+                {
+                    var cell = gridView.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                    var value = cell.Value?.ToString();
+                    if (!string.IsNullOrEmpty(value) && value != "-")
+                    {
+                        var currentFont = cell.Style.Font ?? gridView.DefaultCellStyle.Font;
+                        cell.Style.Font = new Font(currentFont, FontStyle.Underline);
+                        if (cell.Tag == null)
+                        {
+                            cell.Tag = Cursors.Hand;
+                        }
+                    }
+                }
+            };
+
+            // Add cursor change handlers
+            gridView.CellMouseEnter += (sender, e) =>
+            {
+                if (e.ColumnIndex == 3 && e.RowIndex >= 0)
+                {
+                    var cell = gridView.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                    if (cell.Tag is Cursor cursor)
+                    {
+                        gridView.Cursor = cursor;
+                    }
+                }
+            };
+
+            gridView.CellMouseLeave += (sender, e) =>
+            {
+                gridView.Cursor = Cursors.Default;
+            };
 
             // Add selection change handler for the grid
             gridView.CellClick += GridView_CellClick;
@@ -487,19 +577,26 @@ namespace SyncTime
                     {
                         string name = reader.GetValue(0)?.ToString();
                         string ip = reader.GetValue(1)?.ToString();
+                        string mac = reader.GetValue(2)?.ToString()?.ToUpper();
 
                         if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(ip))
                         {
-                            clients.Add(new ClientInfo { Name = name, IP = ip });
+                            clients.Add(new ClientInfo
+                            {
+                                Name = name,
+                                IP = ip,
+                                MacAddress = mac,
+                                ActualMacAddress = ""
+                            });
 
                             if (gridView.InvokeRequired)
                             {
                                 gridView.Invoke(new Action(() =>
-                                    gridView.Rows.Add(name, ip, "Not checked", "-", "-")));
+                                    gridView.Rows.Add(name, ip, mac, "-", "Not checked", "-", "-")));
                             }
                             else
                             {
-                                gridView.Rows.Add(name, ip, "Not checked", "-", "-");
+                                gridView.Rows.Add(name, ip, mac, "-", "Not checked", "-", "-");
                             }
                         }
                     }
@@ -596,6 +693,11 @@ namespace SyncTime
 
         private void UpdateGridRow(string name, string ip, string status, string time = "-")
         {
+            var client = clients.FirstOrDefault(c => c.Name == name && c.IP == ip);
+            if (client != null)
+            {
+                UpdateGridRowWithMac(name, ip, client.MacAddress, client.ActualMacAddress, status, time);
+            }
             if (gridView.InvokeRequired)
             {
                 gridView.Invoke(new Action(() => UpdateGridRow(name, ip, status, time)));
@@ -657,17 +759,205 @@ namespace SyncTime
                     using (var sshClient = new SshClient(client.IP, "root", "123456"))
                     {
                         await Task.Run(() => sshClient.Connect());
+
+                        // Get current time
                         var timeOutput = await Task.Run(() =>
                             sshClient.RunCommand("date '+%Y-%m-%d %H:%M:%S'").Result.Trim());
+
+                        // Get MAC address
+                        var macCommand = "ip link show | grep -i 'link/ether' | awk '{print $2}' | head -n 1";
+                        var actualMac = await Task.Run(() =>
+                            sshClient.RunCommand(macCommand).Result.Trim().ToUpper());
+
+                        client.ActualMacAddress = actualMac;
+
                         sshClient.Disconnect();
 
-                        UpdateGridRow(client.Name, client.IP, "Connected", timeOutput);
+                        UpdateGridRowWithMac(client.Name, client.IP, client.MacAddress, actualMac, "Connected", timeOutput);
                     }
                 }
                 catch (Exception)
                 {
                     UpdateGridRow(client.Name, client.IP, "Connection Failed");
                 }
+            }
+        }
+        private void UpdateGridRowWithMac(string name, string ip, string expectedMac, string actualMac, string status, string time = "-")
+        {
+            if (gridView.InvokeRequired)
+            {
+                gridView.Invoke(new Action(() => UpdateGridRowWithMac(name, ip, expectedMac, actualMac, status, time)));
+                return;
+            }
+
+            foreach (DataGridViewRow row in gridView.Rows)
+            {
+                if (row.Cells[0].Value.ToString() == name && row.Cells[1].Value.ToString() == ip)
+                {
+                    row.Cells[3].Value = actualMac;
+                    row.Cells[4].Value = status;
+
+                    if (time != "-")
+                    {
+                        row.Cells[5].Value = time;
+                        if (status == "Synchronized")
+                        {
+                            row.Cells[6].Value = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(actualMac) && !string.IsNullOrEmpty(expectedMac))
+                    {
+                        if (actualMac != expectedMac)
+                        {
+                            row.Cells[3].Style.BackColor = Color.LightGreen;
+                            row.Cells[3].Style.ForeColor = Color.Black;
+                        }
+                        else
+                        {
+                            row.Cells[3].Style.BackColor = Color.White;
+                            row.Cells[3].Style.ForeColor = Color.Black;
+                        }
+                    }
+
+                    switch (status)
+                    {
+                        case "Synchronized":
+                            row.Cells[4].Style.BackColor = Color.LightGreen;
+                            break;
+                        case "Unreachable":
+                        case "Connection Failed":
+                            row.Cells[4].Style.BackColor = Color.LightPink;
+                            break;
+                        case "Connecting...":
+                        case "Setting time...":
+                            row.Cells[4].Style.BackColor = Color.LightYellow;
+                            break;
+                        default:
+                            row.Cells[4].Style.BackColor = Color.White;
+                            break;
+                    }
+                    break;
+                }
+            }
+        }
+        private void AddSearchAndFilter()
+        {
+            // Create panel for search controls
+            searchAndFilterPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                Height = 40
+            };
+
+            // Configure column styles
+            ((TableLayoutPanel)searchAndFilterPanel).ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            ((TableLayoutPanel)searchAndFilterPanel).ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+            ((TableLayoutPanel)searchAndFilterPanel).ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+
+            // Initialize search box
+            searchBox = new TextBox
+            {
+                PlaceholderText = "Search...",
+                Width = 200,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                Margin = new Padding(5)
+            };
+
+            // Initialize filter dropdown
+            filterColumn = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 150,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(5)
+            };
+
+            filterColumn.Items.AddRange(new string[]
+            {
+        "All Columns",
+        "Client Name",
+        "IP Address",
+        "MAC Address",
+        "Status"
+            });
+            filterColumn.SelectedIndex = 0;
+
+            // Create and configure the search label
+            Label searchLabel = new Label
+            {
+                Text = "Search in:",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                TextAlign = ContentAlignment.MiddleRight,
+                Margin = new Padding(5)
+            };
+
+            // Add controls to search panel
+            ((TableLayoutPanel)searchAndFilterPanel).Controls.Add(searchBox, 0, 0);
+            ((TableLayoutPanel)searchAndFilterPanel).Controls.Add(searchLabel, 1, 0);
+            ((TableLayoutPanel)searchAndFilterPanel).Controls.Add(filterColumn, 2, 0);
+
+            // Modify the main layout to include the search panel
+            // First, store the index of the grid panel
+            int gridIndex = mainLayout.Controls.IndexOf(mainLayout.Controls.OfType<Panel>()
+                .First(p => p.Controls.Contains(gridView)));
+
+            // Add the new row and insert the search panel
+            mainLayout.RowCount++;
+            mainLayout.RowStyles.Insert(2, new RowStyle(SizeType.Absolute, 40));
+
+            // Move all controls down one row starting from the grid's position
+            for (int i = mainLayout.Controls.Count - 1; i >= 0; i--)
+            {
+                Control control = mainLayout.Controls[i];
+                int row = mainLayout.GetRow(control);
+                if (row >= 2)
+                {
+                    mainLayout.SetRow(control, row + 1);
+                }
+            }
+
+            // Add the search panel
+            mainLayout.Controls.Add(searchAndFilterPanel, 0, 2);
+
+            // Add event handlers
+            searchBox.TextChanged += (s, e) => FilterGrid();
+            filterColumn.SelectedIndexChanged += (s, e) => FilterGrid();
+        }
+
+        private void FilterGrid()
+        {
+            string searchText = searchBox.Text.ToLower();
+            string filterBy = filterColumn.SelectedItem.ToString();
+
+            foreach (DataGridViewRow row in gridView.Rows)
+            {
+                bool visible = false;
+                if (string.IsNullOrEmpty(searchText))
+                {
+                    visible = true;
+                }
+                else if (filterBy == "All Columns")
+                {
+                    visible = row.Cells.Cast<DataGridViewCell>()
+                        .Any(cell => cell.Value?.ToString().ToLower()
+                        .Contains(searchText) == true);
+                }
+                else
+                {
+                    int columnIndex = gridView.Columns.Cast<DataGridViewColumn>()
+                        .FirstOrDefault(col => col.HeaderText == filterBy)?.Index ?? -1;
+
+                    if (columnIndex >= 0)
+                    {
+                        visible = row.Cells[columnIndex].Value?.ToString()
+                            .ToLower().Contains(searchText) == true;
+                    }
+                }
+                row.Visible = visible;
             }
         }
     }
