@@ -18,7 +18,6 @@ using System.Xml.Serialization;
 
 namespace SyncTime
 {
-    [Serializable]
     public class ClientInfo
     {
         public string Name { get; set; }
@@ -33,12 +32,9 @@ namespace SyncTime
         public DateTime? LastCheckTime { get; set; }
         public TimeSpan? TimeDrift { get; set; }
         public bool IsDriftCritical { get; set; }
-        [XmlIgnore] // Ignore this property during serialization
         public List<TimeDriftRecord> DriftHistory { get; set; } = new List<TimeDriftRecord>();
     }
 
-
-    [Serializable]
     public class TimeDriftRecord
     {
         public DateTime CheckTime { get; set; }
@@ -86,26 +82,20 @@ namespace SyncTime
                 connectionHistory = new List<ConnectionLog>();
 
                 InitializeComponent();
-
-                // Create menu strip first (it should be at the top)
-                AddCacheManagementMenu();
-
-                // Initialize the main UI components
                 InitializeUI();
 
-                // Add all additional controls after main UI is set up
+                // Handle filter initialization
                 mainLayout.SuspendLayout();
-                AddLoadButton();  // Add load button first since it goes at the top
                 AddSearchAndFilter();
                 AddFilterControls();
-                AddCheckButtons();
+                AddCheckButtons();  // Add the new buttons
                 mainLayout.ResumeLayout();
 
                 // Initialize context menu for drift history
                 InitializeTimeDriftTracking();
 
-                // Load cached data last
-                LoadCachedClients();
+                // Load the data (without automatic time/MAC checks)
+                LoadClientsFromExcel();
             }
             catch (Exception ex)
             {
@@ -143,68 +133,46 @@ namespace SyncTime
 
         private void InitializeUI()
         {
-            try
+            this.Size = new Size(900, 600);
+            this.MinimumSize = new Size(800, 500);
+            this.Text = "FIDS Client Time Sync";
+
+            // Create main layout panel
+            mainLayout = new TableLayoutPanel
             {
-                this.Size = new Size(900, 600);
-                this.MinimumSize = new Size(800, 500);
-                this.Text = "FIDS Client Time Sync";
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                Padding = new Padding(10),
+                AutoSize = true
+            };
 
-                // Create main layout panel with correct number of rows
-                mainLayout = new TableLayoutPanel
-                {
-                    Dock = DockStyle.Fill,
-                    ColumnCount = 1,
-                    RowCount = 6,  // Increased for all our controls
-                    Padding = new Padding(10),
-                    AutoSize = true
-                };
+            // Configure row styles
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Status label
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Grid
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));  // Buttons
 
-                // Configure row styles with correct proportions
-                mainLayout.RowStyles.Clear();
-                mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Load button
-                mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Status label
-                mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Search panel
-                mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Filter panel
-                mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Grid (takes remaining space)
-                mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));  // Buttons
+            this.Controls.Add(mainLayout);
 
-                this.Controls.Add(mainLayout);
-
-                // Initialize status label
-                statusLabel = new Label
-                {
-                    AutoSize = true,
-                    ForeColor = Color.Blue,
-                    Dock = DockStyle.Fill,
-                    Padding = new Padding(0, 5, 0, 5)
-                };
-                mainLayout.Controls.Add(statusLabel, 0, 1);
-
-                // Initialize grid panel with proper docking
-                Panel gridPanel = new Panel
-                {
-                    Dock = DockStyle.Fill,
-                    Padding = new Padding(0, 5, 0, 5)
-                };
-                mainLayout.Controls.Add(gridPanel, 0, 4);  // Grid goes in row 4
-
-                // Initialize the grid view
-                InitializeGrid(gridPanel);
-
-                // Initialize the buttons at the bottom
-                InitializeButtons();
-
-                // Set initial status
-                statusLabel.Text = "Ready to load clients...";
-            }
-            catch (Exception ex)
+            // Status Label
+            statusLabel = new Label
             {
-                throw new Exception("Error in InitializeUI", ex);
-            }
-        }
+                AutoSize = true,
+                ForeColor = Color.Blue,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 5, 0, 5)
+            };
+            mainLayout.Controls.Add(statusLabel, 0, 0);
 
-        private void InitializeGrid(Panel gridPanel)
-        {
+            // Grid View Panel
+            Panel gridPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 5, 0, 5)
+            };
+            mainLayout.Controls.Add(gridPanel, 0, 1);
+
+            // Grid View
             gridView = new DataGridView
             {
                 Dock = DockStyle.Fill,
@@ -215,32 +183,211 @@ namespace SyncTime
                 BackgroundColor = SystemColors.Control,
                 BorderStyle = BorderStyle.Fixed3D,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-                MultiSelect = true
+                MultiSelect = false
             };
 
-            // Add all columns
-            var columns = gridView.Columns;
-            columns.Add("Name", "Client Name");
-            columns.Add("IP", "IP Address");
-            columns.Add("MAC", "MAC Address");
-            columns.Add("ActualMAC", "Actual MAC");
-            columns.Add("Status", "Status");
-            columns.Add("CurrentTime", "Current Time");
-            columns.Add("LastSync", "Last Sync Time");
-            columns.Add("Monitor", "Monitor");
-            columns.Add("Type", "Type");
-            columns.Add("Group", "Group");
-            columns.Add("Level", "Level");
-            columns.Add("Zone", "Zone");
+            // Initialize columns
+            gridView.Columns.Add("Name", "Client Name");
+            gridView.Columns.Add("IP", "IP Address");
+            gridView.Columns.Add("MAC", "MAC Address");
+            gridView.Columns.Add("ActualMAC", "Actual MAC");
+            gridView.Columns.Add("Status", "Status");
+            gridView.Columns.Add("CurrentTime", "Current Time");
+            gridView.Columns.Add("LastSync", "Last Sync Time");
+            gridView.Columns.Add("Monitor", "Monitor");
+            gridView.Columns.Add("Type", "Type");
+            gridView.Columns.Add("Group", "Group");
+            gridView.Columns.Add("Level", "Level");
+            gridView.Columns.Add("Zone", "Zone");
 
-            // Set column properties
-            foreach (DataGridViewColumn col in columns)
-            {
-                col.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-            }
+            // Set column weights
+            gridView.Columns[0].FillWeight = 15;  // Name
+            gridView.Columns[1].FillWeight = 15;  // IP
+            gridView.Columns[2].FillWeight = 15;  // MAC
+            gridView.Columns[3].FillWeight = 15;  // Actual MAC
+            gridView.Columns[4].FillWeight = 10;  // Status
+            gridView.Columns[5].FillWeight = 15;  // Current Time
+            gridView.Columns[6].FillWeight = 15;  // Last Sync
+            gridView.Columns[7].FillWeight = 10;  // Monitor
+            gridView.Columns[8].FillWeight = 10;  // Type
+            gridView.Columns[9].FillWeight = 10;  // Group
+            gridView.Columns[10].FillWeight = 10; // Level
+            gridView.Columns[11].FillWeight = 10; // Zone
 
-            // Add to panel
             gridPanel.Controls.Add(gridView);
+
+            // Add MAC address copy functionality
+            gridView.CellClick += (sender, e) =>
+            {
+                if (e.RowIndex >= 0 && e.ColumnIndex == 3)
+                {
+                    var macAddress = gridView.Rows[e.RowIndex].Cells[3].Value?.ToString();
+                    if (!string.IsNullOrEmpty(macAddress) && macAddress != "-")
+                    {
+                        try
+                        {
+                            Clipboard.SetText(macAddress);
+
+                            var originalColor = gridView.Rows[e.RowIndex].Cells[3].Style.BackColor;
+                            gridView.Rows[e.RowIndex].Cells[3].Style.BackColor = Color.Yellow;
+
+                            var tooltip = new ToolTip();
+                            var relativeMousePos = gridView.PointToClient(Cursor.Position);
+                            tooltip.Show("MAC Address Copied!", gridView, relativeMousePos.X + 15, relativeMousePos.Y, 1000);
+
+                            Task.Delay(200).ContinueWith(t =>
+                            {
+                                if (gridView.InvokeRequired)
+                                {
+                                    gridView.Invoke(new Action(() =>
+                                    {
+                                        gridView.Rows[e.RowIndex].Cells[3].Style.BackColor = originalColor;
+                                    }));
+                                }
+                                else
+                                {
+                                    gridView.Rows[e.RowIndex].Cells[3].Style.BackColor = originalColor;
+                                }
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Failed to copy MAC address: {ex.Message}", "Copy Error",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                }
+            };
+
+            // Add cell formatting for MAC address column
+            gridView.CellFormatting += (sender, e) =>
+            {
+                if (e.ColumnIndex == 3 && e.RowIndex >= 0)
+                {
+                    var cell = gridView.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                    var value = cell.Value?.ToString();
+                    if (!string.IsNullOrEmpty(value) && value != "-")
+                    {
+                        var currentFont = cell.Style.Font ?? gridView.DefaultCellStyle.Font;
+                        cell.Style.Font = new Font(currentFont, FontStyle.Underline);
+                        if (cell.Tag == null)
+                        {
+                            cell.Tag = Cursors.Hand;
+                        }
+                    }
+                }
+            };
+
+            // Add cursor change handlers
+            gridView.CellMouseEnter += (sender, e) =>
+            {
+                if (e.ColumnIndex == 3 && e.RowIndex >= 0)
+                {
+                    var cell = gridView.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                    if (cell.Tag is Cursor cursor)
+                    {
+                        gridView.Cursor = cursor;
+                    }
+                }
+            };
+
+            gridView.CellMouseLeave += (sender, e) =>
+            {
+                gridView.Cursor = Cursors.Default;
+            };
+
+            // Add selection change handler for the grid
+            gridView.CellClick += GridView_CellClick;
+
+            // Button Panel
+            Panel buttonPanel = new Panel
+            {
+                Dock = DockStyle.Fill
+            };
+            mainLayout.Controls.Add(buttonPanel, 0, 2);
+
+            // Create a TableLayoutPanel for the buttons
+            TableLayoutPanel buttonsLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 6,
+                RowCount = 1
+            };
+            buttonPanel.Controls.Add(buttonsLayout);
+
+            // Sync Button
+            syncButton = new Button
+            {
+                Text = "Synchronize Time",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
+            };
+            syncButton.Click += SyncButton_Click;
+
+            // Execute Code Button
+            executeCodeButton = new Button
+            {
+                Text = "Execute Code",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
+            };
+            executeCodeButton.Click += ExecuteCodeButton_Click;
+
+            // Create export button
+            exportButton = new Button
+            {
+                Text = "Export Data",
+                Size = new Size(150, 30),
+                Enabled = true,
+                Anchor = AnchorStyles.None
+            };
+            exportButton.Click += ExportButton_Click;
+
+            // Statistics button
+            statisticsButton = new Button
+            {
+                Text = "Statistics",
+                Size = new Size(150, 30),
+                Enabled = true,
+                Anchor = AnchorStyles.None
+            };
+            statisticsButton.Click += StatisticsButton_Click;
+
+            // Batch operations button
+            batchOperationsButton = new Button
+            {
+                Text = "Batch Operations",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
+            };
+            batchOperationsButton.Click += BatchOperationsButton_Click;
+
+            // History button
+            historyButton = new Button
+            {
+                Text = "Connection History",
+                Size = new Size(150, 30),
+                Enabled = true,
+                Anchor = AnchorStyles.None
+            };
+            historyButton.Click += HistoryButton_Click;
+
+            // Add buttons to the layout
+            buttonsLayout.Controls.Add(syncButton, 0, 0);
+            buttonsLayout.Controls.Add(executeCodeButton, 1, 0);
+            buttonsLayout.Controls.Add(exportButton, 2, 0);
+            buttonsLayout.Controls.Add(statisticsButton, 3, 0);
+            buttonsLayout.Controls.Add(batchOperationsButton, 4, 0);
+            buttonsLayout.Controls.Add(historyButton, 5, 0);
+
+            // Center the buttons in their cells
+            for (int i = 0; i < 6; i++)
+            {
+                buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
+            }
 
             // Style the grid
             gridView.EnableHeadersVisualStyles = false;
@@ -250,108 +397,13 @@ namespace SyncTime
             gridView.ColumnHeadersHeight = 35;
             gridView.RowTemplate.Height = 30;
             gridView.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(250, 250, 250);
+            gridView.MultiSelect = true;
+            gridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
 
-            // Add event handlers
-            gridView.CellClick += GridView_CellClick;
             gridView.SelectionChanged += GridView_SelectionChanged;
-        }
 
-        private void InitializeButtons()
-        {
-            try
-            {
-                // Button Panel
-                Panel buttonPanel = new Panel
-                {
-                    Dock = DockStyle.Fill
-                };
-                mainLayout.Controls.Add(buttonPanel, 0, 5); // Add to the last row
-
-                // Create a TableLayoutPanel for the buttons
-                TableLayoutPanel buttonsLayout = new TableLayoutPanel
-                {
-                    Dock = DockStyle.Fill,
-                    ColumnCount = 6,
-                    RowCount = 1
-                };
-
-                // Add column styles
-                for (int i = 0; i < 6; i++)
-                {
-                    buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16.66f));
-                }
-
-                buttonPanel.Controls.Add(buttonsLayout);
-
-                // Initialize buttons
-                syncButton = new Button
-                {
-                    Text = "Synchronize Time",
-                    Size = new Size(150, 30),
-                    Enabled = false,
-                    Anchor = AnchorStyles.None
-                };
-
-                executeCodeButton = new Button
-                {
-                    Text = "Execute Code",
-                    Size = new Size(150, 30),
-                    Enabled = false,
-                    Anchor = AnchorStyles.None
-                };
-
-                exportButton = new Button
-                {
-                    Text = "Export Data",
-                    Size = new Size(150, 30),
-                    Enabled = true,
-                    Anchor = AnchorStyles.None
-                };
-
-                statisticsButton = new Button
-                {
-                    Text = "Statistics",
-                    Size = new Size(150, 40),
-                    Enabled = true,
-                    Anchor = AnchorStyles.None
-                };
-
-                batchOperationsButton = new Button
-                {
-                    Text = "Batch Operations",
-                    Size = new Size(150, 40),
-                    Enabled = false,
-                    Anchor = AnchorStyles.None
-                };
-
-                historyButton = new Button
-                {
-                    Text = "Connection History",
-                    Size = new Size(150, 40),
-                    Enabled = true,
-                    Anchor = AnchorStyles.None
-                };
-
-                // Add event handlers
-                syncButton.Click += SyncButton_Click;
-                executeCodeButton.Click += ExecuteCodeButton_Click;
-                exportButton.Click += ExportButton_Click;
-                statisticsButton.Click += StatisticsButton_Click;
-                batchOperationsButton.Click += BatchOperationsButton_Click;
-                historyButton.Click += HistoryButton_Click;
-
-                // Add buttons to layout
-                buttonsLayout.Controls.Add(syncButton, 0, 0);
-                buttonsLayout.Controls.Add(executeCodeButton, 1, 0);
-                buttonsLayout.Controls.Add(exportButton, 2, 0);
-                buttonsLayout.Controls.Add(statisticsButton, 3, 0);
-                buttonsLayout.Controls.Add(batchOperationsButton, 4, 0);
-                buttonsLayout.Controls.Add(historyButton, 5, 0);
-            }
-            catch (Exception ex)
-            {
-                throw new Exception("Error initializing buttons", ex);
-            }
+            // Set initial status
+            statusLabel.Text = "Loading clients...";
         }
 
         private void GridView_CellClick(object sender, DataGridViewCellEventArgs e)
@@ -487,9 +539,9 @@ namespace SyncTime
                 isConnected = true;
                 UpdateGridRow(clientName, clientIP, "Connected");
                 LogConnection(clientName, clientIP, "Execute Code", "Connected");
-
+                
                 resultsBox.AppendText("Connected to " + clientIP + "\r\n");
-
+                
             }
             catch (Exception ex)
             {
@@ -1698,7 +1750,7 @@ namespace SyncTime
                         sshClient.Disconnect();
                         LogConnection(name, ip, "Batch Command", "Completed", result.Result);
                     }
-
+                    
                 }
                 catch (Exception ex)
                 {
@@ -2907,176 +2959,6 @@ namespace SyncTime
             PopulateDropDown(dropDowns[2], c => c.Group);
             PopulateDropDown(dropDowns[3], c => c.Level);
             PopulateDropDown(dropDowns[4], c => c.Zone);
-        }
-
-        private void AddLoadButton()
-        {
-            // Create a new panel for the load button
-            var loadButtonPanel = new Panel
-            {
-                Height = 40,
-                Dock = DockStyle.Top
-            };
-
-            loadClientsButton = new Button
-            {
-                Text = "Load/Refresh Clients from Excel",
-                Width = 200,
-                Location = new Point(10, 5),
-                Height = 30
-            };
-            loadClientsButton.Click += LoadClientsButton_Click;
-
-            loadButtonPanel.Controls.Add(loadClientsButton);
-
-            // Add the panel to mainLayout at position 0 (top)
-            mainLayout.Controls.Add(loadButtonPanel, 0, 0);
-            mainLayout.SetRow(loadButtonPanel, 0);
-        }
-
-        private async void LoadClientsButton_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                var result = MessageBox.Show(
-                    "Do you want to reload clients from Excel file?\nThis will refresh all client data.",
-                    "Reload Clients",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Yes)
-                {
-                    loadClientsButton.Enabled = false;
-                    statusLabel.Text = "Loading clients from Excel...";
-                    statusLabel.ForeColor = Color.Blue;
-
-                    await Task.Run(() => LoadIPsFromExcel(EXCEL_FILE_PATH));
-                    SaveClientsToCache();
-
-                    statusLabel.Text = $"Loaded {clients.Count} clients";
-                    statusLabel.ForeColor = Color.Green;
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error loading clients: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-                statusLabel.Text = "Error loading clients";
-                statusLabel.ForeColor = Color.Red;
-            }
-            finally
-            {
-                loadClientsButton.Enabled = true;
-            }
-        }
-
-        private void LoadCachedClients()
-        {
-            try
-            {
-                if (File.Exists(CACHE_FILE_PATH))
-                {
-                    statusLabel.Text = "Loading cached client data...";
-                    statusLabel.ForeColor = Color.Blue;
-
-                    var serializer = new XmlSerializer(typeof(List<ClientInfo>));
-                    using (var stream = new FileStream(CACHE_FILE_PATH, FileMode.Open))
-                    {
-                        clients = (List<ClientInfo>)serializer.Deserialize(stream);
-                    }
-
-                    // Update the grid with cached data
-                    UpdateGridWithClients();
-                    UpdateFilterOptions();
-
-                    statusLabel.Text = $"Loaded {clients.Count} clients from cache";
-                    statusLabel.ForeColor = Color.Green;
-                    LogLoadingSummary();
-                }
-                else
-                {
-                    statusLabel.Text = "No cached data found. Please load clients from Excel.";
-                    statusLabel.ForeColor = Color.Blue;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error loading cache: {ex}");
-                statusLabel.Text = "Error loading cached data. Please load clients from Excel.";
-                statusLabel.ForeColor = Color.Red;
-            }
-        }
-
-        private void SaveClientsToCache()
-        {
-            try
-            {
-                var serializer = new XmlSerializer(typeof(List<ClientInfo>));
-                using (var stream = new FileStream(CACHE_FILE_PATH, FileMode.Create))
-                {
-                    serializer.Serialize(stream, clients);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error saving cache: {ex}");
-            }
-        }
-
-        private void UpdateGridWithClients()
-        {
-            if (gridView.InvokeRequired)
-            {
-                gridView.Invoke(new Action(UpdateGridWithClients));
-                return;
-            }
-
-            gridView.Rows.Clear();
-            foreach (var client in clients)
-            {
-                AddRowToGrid(client);
-            }
-        }
-
-        // Add menu items for cache management
-        private void AddCacheManagementMenu()
-        {
-            var menuStrip = new MenuStrip();
-            var fileMenu = new ToolStripMenuItem("File");
-            var clearCacheItem = new ToolStripMenuItem("Clear Cache", null, (s, e) =>
-            {
-                var result = MessageBox.Show(
-                    "Are you sure you want to clear the cached client data?",
-                    "Clear Cache",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question);
-
-                if (result == DialogResult.Yes)
-                {
-                    try
-                    {
-                        if (File.Exists(CACHE_FILE_PATH))
-                        {
-                            File.Delete(CACHE_FILE_PATH);
-                        }
-                        clients.Clear();
-                        gridView.Rows.Clear();
-                        UpdateFilterOptions();
-                        statusLabel.Text = "Cache cleared. Please load clients from Excel.";
-                        statusLabel.ForeColor = Color.Blue;
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Error clearing cache: {ex.Message}", "Error",
-                            MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
-                }
-            });
-
-            fileMenu.DropDownItems.Add(clearCacheItem);
-            menuStrip.Items.Add(fileMenu);
-            this.MainMenuStrip = menuStrip;
-            this.Controls.Add(menuStrip);
         }
     }
 
