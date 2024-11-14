@@ -18,6 +18,7 @@ using System.Xml.Serialization;
 
 namespace SyncTime
 {
+    [Serializable]
     public class ClientInfo
     {
         public string Name { get; set; }
@@ -32,6 +33,7 @@ namespace SyncTime
         public DateTime? LastCheckTime { get; set; }
         public TimeSpan? TimeDrift { get; set; }
         public bool IsDriftCritical { get; set; }
+        [XmlIgnore] // Ignore this property during serialization
         public List<TimeDriftRecord> DriftHistory { get; set; } = new List<TimeDriftRecord>();
     }
 
@@ -82,20 +84,26 @@ namespace SyncTime
                 connectionHistory = new List<ConnectionLog>();
 
                 InitializeComponent();
+
+                // Create menu strip first (it should be at the top)
+                AddCacheManagementMenu();
+
+                // Initialize the main UI components
                 InitializeUI();
 
-                // Handle filter initialization
+                // Add all additional controls after main UI is set up
                 mainLayout.SuspendLayout();
+                AddLoadButton();  // Add load button first since it goes at the top
                 AddSearchAndFilter();
                 AddFilterControls();
-                AddCheckButtons();  // Add the new buttons
+                AddCheckButtons();
                 mainLayout.ResumeLayout();
 
                 // Initialize context menu for drift history
                 InitializeTimeDriftTracking();
 
-                // Load the data (without automatic time/MAC checks)
-                LoadClientsFromExcel();
+                // Load cached data last
+                LoadCachedClients();
             }
             catch (Exception ex)
             {
@@ -142,13 +150,13 @@ namespace SyncTime
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 Padding = new Padding(10),
                 AutoSize = true
             };
 
             // Configure row styles
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Status label
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));  // Status label
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Grid
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));  // Buttons
 
@@ -539,9 +547,9 @@ namespace SyncTime
                 isConnected = true;
                 UpdateGridRow(clientName, clientIP, "Connected");
                 LogConnection(clientName, clientIP, "Execute Code", "Connected");
-                
+
                 resultsBox.AppendText("Connected to " + clientIP + "\r\n");
-                
+
             }
             catch (Exception ex)
             {
@@ -1750,7 +1758,7 @@ namespace SyncTime
                         sshClient.Disconnect();
                         LogConnection(name, ip, "Batch Command", "Completed", result.Result);
                     }
-                    
+
                 }
                 catch (Exception ex)
                 {
@@ -2959,6 +2967,175 @@ namespace SyncTime
             PopulateDropDown(dropDowns[2], c => c.Group);
             PopulateDropDown(dropDowns[3], c => c.Level);
             PopulateDropDown(dropDowns[4], c => c.Zone);
+        }
+
+        private void AddLoadButton()
+        {
+            // Create a new panel for the load button
+            var loadButtonPanel = new Panel
+            {
+                Height = 40,
+                Dock = DockStyle.Bottom
+            };
+
+            loadClientsButton = new Button
+            {
+                Text = "Load/Refresh Clients from Excel",
+                Width = 200,
+                Location = new Point(10, 5),
+                Height = 30
+            };
+            loadClientsButton.Click += LoadClientsButton_Click;
+
+            loadButtonPanel.Controls.Add(loadClientsButton);
+
+            // Add the panel to mainLayout at position 0 (top)
+            mainLayout.Controls.Add(loadButtonPanel, 0, 4);
+        }
+
+        private async void LoadClientsButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var result = MessageBox.Show(
+                    "Do you want to reload clients from Excel file?\nThis will refresh all client data.",
+                    "Reload Clients",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    loadClientsButton.Enabled = false;
+                    statusLabel.Text = "Loading clients from Excel...";
+                    statusLabel.ForeColor = Color.Blue;
+
+                    await Task.Run(() => LoadIPsFromExcel(EXCEL_FILE_PATH));
+                    SaveClientsToCache();
+
+                    statusLabel.Text = $"Loaded {clients.Count} clients";
+                    statusLabel.ForeColor = Color.Green;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading clients: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                statusLabel.Text = "Error loading clients";
+                statusLabel.ForeColor = Color.Red;
+            }
+            finally
+            {
+                loadClientsButton.Enabled = true;
+            }
+        }
+
+        private void LoadCachedClients()
+        {
+            try
+            {
+                if (File.Exists(CACHE_FILE_PATH))
+                {
+                    statusLabel.Text = "Loading cached client data...";
+                    statusLabel.ForeColor = Color.Blue;
+
+                    var serializer = new XmlSerializer(typeof(List<ClientInfo>));
+                    using (var stream = new FileStream(CACHE_FILE_PATH, FileMode.Open))
+                    {
+                        clients = (List<ClientInfo>)serializer.Deserialize(stream);
+                    }
+
+                    // Update the grid with cached data
+                    UpdateGridWithClients();
+                    UpdateFilterOptions();
+
+                    statusLabel.Text = $"Loaded {clients.Count} clients from cache";
+                    statusLabel.ForeColor = Color.Green;
+                    LogLoadingSummary();
+                }
+                else
+                {
+                    statusLabel.Text = "No cached data found. Please load clients from Excel.";
+                    statusLabel.ForeColor = Color.Blue;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error loading cache: {ex}");
+                statusLabel.Text = "Error loading cached data. Please load clients from Excel.";
+                statusLabel.ForeColor = Color.Red;
+            }
+        }
+
+        private void SaveClientsToCache()
+        {
+            try
+            {
+                var serializer = new XmlSerializer(typeof(List<ClientInfo>));
+                using (var stream = new FileStream(CACHE_FILE_PATH, FileMode.Create))
+                {
+                    serializer.Serialize(stream, clients);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error saving cache: {ex}");
+            }
+        }
+
+        private void UpdateGridWithClients()
+        {
+            if (gridView.InvokeRequired)
+            {
+                gridView.Invoke(new Action(UpdateGridWithClients));
+                return;
+            }
+
+            gridView.Rows.Clear();
+            foreach (var client in clients)
+            {
+                AddRowToGrid(client);
+            }
+        }
+
+        // Add menu items for cache management
+        private void AddCacheManagementMenu()
+        {
+            var menuStrip = new MenuStrip();
+            var fileMenu = new ToolStripMenuItem("File");
+            var clearCacheItem = new ToolStripMenuItem("Clear Cache", null, (s, e) =>
+            {
+                var result = MessageBox.Show(
+                    "Are you sure you want to clear the cached client data?",
+                    "Clear Cache",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    try
+                    {
+                        if (File.Exists(CACHE_FILE_PATH))
+                        {
+                            File.Delete(CACHE_FILE_PATH);
+                        }
+                        clients.Clear();
+                        gridView.Rows.Clear();
+                        UpdateFilterOptions();
+                        statusLabel.Text = "Cache cleared. Please load clients from Excel.";
+                        statusLabel.ForeColor = Color.Blue;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Error clearing cache: {ex.Message}", "Error",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            });
+
+            fileMenu.DropDownItems.Add(clearCacheItem);
+            menuStrip.Items.Add(fileMenu);
+            this.MainMenuStrip = menuStrip;
+            this.Controls.Add(menuStrip);
         }
     }
 
