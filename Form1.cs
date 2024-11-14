@@ -152,11 +152,12 @@ namespace SyncTime
                 ColumnCount = 1,
                 RowCount = 4,
                 Padding = new Padding(10),
-                AutoSize = true
+                AutoSize = true,
+                Margin = new Padding(25, 25, 25, 25)
             };
 
             // Configure row styles
-            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));  // Status label
+            mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));  // Status label
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // Grid
             mainLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));  // Buttons
 
@@ -168,7 +169,8 @@ namespace SyncTime
                 AutoSize = true,
                 ForeColor = Color.Blue,
                 Dock = DockStyle.Fill,
-                Padding = new Padding(0, 5, 0, 5)
+                Padding = new Padding(0, 5, 0, 5),
+                Margin = new Padding(0, 14, 0, 0)
             };
             mainLayout.Controls.Add(statusLabel, 0, 0);
 
