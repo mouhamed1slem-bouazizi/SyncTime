@@ -74,6 +74,7 @@ namespace SyncTime
         private Button checkMacButton;
         private const string CACHE_FILE_PATH = @"C:\IP\client_cache.xml";
         private Button loadClientsButton;
+        private Button modifyButton;
 
         public Form1()
         {
@@ -181,6 +182,15 @@ namespace SyncTime
                 Padding = new Padding(0, 5, 0, 5)
             };
             mainLayout.Controls.Add(gridPanel, 0, 1);
+
+            modifyButton = new Button
+            {
+                Text = "Modify",
+                Size = new Size(150, 30),
+                Enabled = false,  // Will be enabled when a row is selected
+                Anchor = AnchorStyles.None
+            };
+            modifyButton.Click += ModifyButton_Click;
 
             // Grid View
             gridView = new DataGridView
@@ -392,6 +402,7 @@ namespace SyncTime
             buttonsLayout.Controls.Add(statisticsButton, 3, 0);
             buttonsLayout.Controls.Add(batchOperationsButton, 4, 0);
             buttonsLayout.Controls.Add(historyButton, 5, 0);
+            buttonsLayout.Controls.Add(modifyButton, 6, 0);  // Adjust the column index as needed
 
             // Center the buttons in their cells
             for (int i = 0; i < 6; i++)
@@ -1581,6 +1592,7 @@ namespace SyncTime
         private void GridView_SelectionChanged(object sender, EventArgs e)
         {
             batchOperationsButton.Enabled = gridView.SelectedRows.Count > 0;
+            modifyButton.Enabled = gridView.SelectedRows.Count == 1;
         }
 
         private void BatchOperationsButton_Click(object sender, EventArgs e)
@@ -3138,6 +3150,240 @@ namespace SyncTime
             menuStrip.Items.Add(fileMenu);
             this.MainMenuStrip = menuStrip;
             this.Controls.Add(menuStrip);
+        }
+
+        private void ModifyButton_Click(object sender, EventArgs e)
+        {
+            if (gridView.SelectedRows.Count != 1) return;
+
+            var selectedRow = gridView.SelectedRows[0];
+            var modifyForm = new Form
+            {
+                Text = "Modify Client Information",
+                Size = new Size(500, 500),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false
+            };
+
+            var layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10),
+                ColumnCount = 2,
+                RowCount = 9
+            };
+
+            // Add fields for modification
+            var fields = new Dictionary<string, (TextBox TextBox, string OriginalValue)>
+    {
+        { "Name", (new TextBox(), selectedRow.Cells["Name"].Value.ToString()) },
+        { "IP", (new TextBox(), selectedRow.Cells["IP"].Value.ToString()) },
+        { "MAC", (new TextBox(), selectedRow.Cells["MAC"].Value.ToString()) },
+        { "Monitor", (new TextBox(), selectedRow.Cells["Monitor"].Value.ToString()) },
+        { "Type", (new TextBox(), selectedRow.Cells["Type"].Value.ToString()) },
+        { "Group", (new TextBox(), selectedRow.Cells["Group"].Value.ToString()) },
+        { "Level", (new TextBox(), selectedRow.Cells["Level"].Value.ToString()) },
+        { "Zone", (new TextBox(), selectedRow.Cells["Zone"].Value.ToString()) }
+    };
+
+            int row = 0;
+            foreach (var field in fields)
+            {
+                layout.Controls.Add(new Label { Text = field.Key, Dock = DockStyle.Fill }, 0, row);
+                field.Value.TextBox.Text = field.Value.OriginalValue;
+                field.Value.TextBox.Dock = DockStyle.Fill;
+                layout.Controls.Add(field.Value.TextBox, 1, row);
+                row++;
+            }
+
+            // Add buttons
+            var buttonPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft
+            };
+
+            var saveButton = new Button { Text = "Save", Width = 100 };
+            var cancelButton = new Button { Text = "Cancel", Width = 100 };
+
+            saveButton.Click += async (s, ev) =>
+            {
+                try
+                {
+                    var result = MessageBox.Show(
+                        "Save changes to Excel file?",
+                        "Confirm Save",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                    if (result == DialogResult.No)
+                    {
+                        modifyForm.Close();
+                        return;
+                    }
+
+                    Cursor.Current = Cursors.WaitCursor;
+                    loadClientsButton.Enabled = false;
+                    modifyForm.Enabled = false;
+
+                    // Create backup first
+                    string backupFile = Path.Combine(
+                        Path.GetDirectoryName(EXCEL_FILE_PATH),
+                        Path.GetFileNameWithoutExtension(EXCEL_FILE_PATH) + "_backup.xlsx"
+                    );
+
+                    if (File.Exists(backupFile))
+                        File.Delete(backupFile);
+
+                    File.Copy(EXCEL_FILE_PATH, backupFile);
+
+                    await Task.Run(() =>
+                    {
+                        try
+                        {
+                            // Create a new workbook to copy data to
+                            using (var sourceWorkbook = new XLWorkbook(EXCEL_FILE_PATH))
+                            using (var newWorkbook = new XLWorkbook())
+                            {
+                                var sourceWorksheet = sourceWorkbook.Worksheet(EXCEL_SHEET_NAME);
+                                var newWorksheet = newWorkbook.Worksheets.Add(EXCEL_SHEET_NAME);
+
+                                // Copy the used range from source to new worksheet
+                                var usedRange = sourceWorksheet.RangeUsed();
+                                if (usedRange != null)
+                                {
+                                    // Copy content and formatting
+                                    var firstCell = newWorksheet.Cell(1, 1);
+                                    usedRange.CopyTo(firstCell);
+                                }
+
+                                // Find and update our specific row
+                                var rows = newWorksheet.RowsUsed();
+                                bool foundRow = false;
+
+                                foreach (var xlRow in rows)
+                                {
+                                    string nameCell = xlRow.Cell("A").GetString().Trim();
+                                    string ipCell = xlRow.Cell("B").GetString().Trim();
+
+                                    if (nameCell == fields["Name"].OriginalValue &&
+                                        ipCell == fields["IP"].OriginalValue)
+                                    {
+                                        foundRow = true;
+                                        xlRow.Cell("A").Value = fields["Name"].TextBox.Text;
+                                        xlRow.Cell("B").Value = fields["IP"].TextBox.Text;
+                                        xlRow.Cell("C").Value = fields["MAC"].TextBox.Text;
+                                        xlRow.Cell("D").Value = fields["Monitor"].TextBox.Text;
+                                        xlRow.Cell("E").Value = fields["Type"].TextBox.Text;
+                                        xlRow.Cell("F").Value = fields["Group"].TextBox.Text;
+                                        xlRow.Cell("G").Value = fields["Level"].TextBox.Text;
+                                        xlRow.Cell("H").Value = fields["Zone"].TextBox.Text;
+                                        break;
+                                    }
+                                }
+
+                                if (!foundRow)
+                                    throw new Exception("Could not find the row to update.");
+
+                                // Save to a new temporary file
+                                string tempFile = Path.Combine(
+                                    Path.GetDirectoryName(EXCEL_FILE_PATH),
+                                    $"temp_{DateTime.Now:yyyyMMddHHmmss}.xlsx"
+                                );
+
+                                newWorkbook.SaveAs(tempFile);
+
+                                // Close all workbooks
+                                newWorkbook.Dispose();
+                                sourceWorkbook.Dispose();
+
+                                // Small delay to ensure files are released
+                                Thread.Sleep(500);
+
+                                // Replace the original file
+                                if (File.Exists(EXCEL_FILE_PATH))
+                                    File.Delete(EXCEL_FILE_PATH);
+
+                                File.Move(tempFile, EXCEL_FILE_PATH);
+
+                                // Update client object in the list
+                                var client = clients.FirstOrDefault(c =>
+                                    c.Name == fields["Name"].OriginalValue &&
+                                    c.IP == fields["IP"].OriginalValue);
+
+                                if (client != null)
+                                {
+                                    client.Name = fields["Name"].TextBox.Text;
+                                    client.IP = fields["IP"].TextBox.Text;
+                                    client.MacAddress = fields["MAC"].TextBox.Text;
+                                    client.Monitor = fields["Monitor"].TextBox.Text;
+                                    client.Type = fields["Type"].TextBox.Text;
+                                    client.Group = fields["Group"].TextBox.Text;
+                                    client.Level = fields["Level"].TextBox.Text;
+                                    client.Zone = fields["Zone"].TextBox.Text;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // If anything fails, restore from backup
+                            if (File.Exists(backupFile))
+                            {
+                                if (File.Exists(EXCEL_FILE_PATH))
+                                    File.Delete(EXCEL_FILE_PATH);
+                                File.Copy(backupFile, EXCEL_FILE_PATH);
+                            }
+                            throw;
+                        }
+                        finally
+                        {
+                            // Clean up backup file
+                            if (File.Exists(backupFile))
+                                File.Delete(backupFile);
+                        }
+                    });
+
+                    // Update grid view
+                    selectedRow.Cells["Name"].Value = fields["Name"].TextBox.Text;
+                    selectedRow.Cells["IP"].Value = fields["IP"].TextBox.Text;
+                    selectedRow.Cells["MAC"].Value = fields["MAC"].TextBox.Text;
+                    selectedRow.Cells["Monitor"].Value = fields["Monitor"].TextBox.Text;
+                    selectedRow.Cells["Type"].Value = fields["Type"].TextBox.Text;
+                    selectedRow.Cells["Group"].Value = fields["Group"].TextBox.Text;
+                    selectedRow.Cells["Level"].Value = fields["Level"].TextBox.Text;
+                    selectedRow.Cells["Zone"].Value = fields["Zone"].TextBox.Text;
+
+                    // Update the cache
+                    SaveClientsToCache();
+
+                    MessageBox.Show("Changes saved successfully!", "Success",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    modifyForm.Close();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error saving changes: {ex.Message}", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    loadClientsButton.Enabled = true;
+                    modifyForm.Enabled = true;
+                    Cursor.Current = Cursors.Default;
+                }
+            };
+
+            cancelButton.Click += (s, ev) => modifyForm.Close();
+
+            buttonPanel.Controls.Add(cancelButton);
+            buttonPanel.Controls.Add(saveButton);
+            layout.Controls.Add(buttonPanel, 0, 8);
+            layout.SetColumnSpan(buttonPanel, 2);
+
+            modifyForm.Controls.Add(layout);
+            modifyForm.ShowDialog();
         }
     }
 
