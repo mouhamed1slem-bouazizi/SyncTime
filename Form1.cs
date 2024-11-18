@@ -48,6 +48,10 @@ namespace SyncTime
     {
         private const string EXCEL_FILE_PATH = @"C:\IP\Dammam_Inventory.xlsx";
         private const string EXCEL_SHEET_NAME = "FIDS_Inv";
+        private const string WINSCP_PATH = @"C:\Program Files (x86)\WinSCP\WinSCP.exe";
+        private Button winscpButton;
+        private const string WINSCP_INI_PATH = @"C:\IP\WinSCP.ini";
+
 
         // Fields declaration
         private List<ClientInfo> clients;
@@ -330,7 +334,7 @@ namespace SyncTime
             TableLayoutPanel buttonsLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 6,
+                ColumnCount = 7,
                 RowCount = 1
             };
             buttonPanel.Controls.Add(buttonsLayout);
@@ -395,19 +399,37 @@ namespace SyncTime
             };
             historyButton.Click += HistoryButton_Click;
 
+            winscpButton = new Button
+            {
+                Text = "Open in WinSCP",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
+            };
+
             // Add buttons to the layout
-            buttonsLayout.Controls.Add(syncButton, 0, 0);
-            buttonsLayout.Controls.Add(executeCodeButton, 1, 0);
-            buttonsLayout.Controls.Add(exportButton, 2, 0);
-            buttonsLayout.Controls.Add(statisticsButton, 3, 0);
-            buttonsLayout.Controls.Add(batchOperationsButton, 4, 0);
-            buttonsLayout.Controls.Add(historyButton, 5, 0);
-            buttonsLayout.Controls.Add(modifyButton, 6, 0);  // Adjust the column index as needed
+            //buttonsLayout.Controls.Add(syncButton, 0, 0);
+            buttonsLayout.Controls.Add(executeCodeButton, 0, 0);
+            buttonsLayout.Controls.Add(exportButton, 1, 0);
+            buttonsLayout.Controls.Add(statisticsButton, 2, 0);
+            buttonsLayout.Controls.Add(batchOperationsButton, 3, 0);
+            buttonsLayout.Controls.Add(historyButton, 4, 0);
+            buttonsLayout.Controls.Add(modifyButton, 5, 0);  // Adjust the column index as needed
+            winscpButton = new Button
+            {
+                Text = "Open in WinSCP",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
+            };
+            winscpButton.Click += WinscpButton_Click;
+            buttonsLayout.Controls.Add(winscpButton, 6, 0);
+
 
             // Center the buttons in their cells
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < 7; i++)  // Updated to 7 columns
             {
-                buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
+                buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14.28f));  // 100/7 ≈ 14.28
             }
 
             // Style the grid
@@ -1591,8 +1613,13 @@ namespace SyncTime
 
         private void GridView_SelectionChanged(object sender, EventArgs e)
         {
-            batchOperationsButton.Enabled = gridView.SelectedRows.Count > 0;
-            modifyButton.Enabled = gridView.SelectedRows.Count == 1;
+            bool singleRowSelected = gridView.SelectedRows.Count == 1;
+            bool anyRowsSelected = gridView.SelectedRows.Count > 0;
+
+            batchOperationsButton.Enabled = anyRowsSelected;
+            modifyButton.Enabled = singleRowSelected;
+            winscpButton.Enabled = singleRowSelected;
+            executeCodeButton.Enabled = singleRowSelected;
         }
 
         private void BatchOperationsButton_Click(object sender, EventArgs e)
@@ -3384,6 +3411,140 @@ namespace SyncTime
 
             modifyForm.Controls.Add(layout);
             modifyForm.ShowDialog();
+        }
+
+        // Add this method to handle launching WinSCP
+        private void OpenInWinSCP(string clientName, string ipAddress)
+        {
+            try
+            {
+                if (!File.Exists(WINSCP_PATH))
+                {
+                    MessageBox.Show("WinSCP not found at the default location. Please install WinSCP or update the path.",
+                        "WinSCP Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // Create WinSCP INI file with session settings
+                string iniContent = @"[Configuration\Interface]
+RandomSeedFile=
+PaintBackground=1
+
+[Configuration\Security]
+UseMasterPassword=0
+
+[Sessions\FIDS]
+HostName=" + ipAddress + @"
+UserName=root
+Password=123456
+Protocol=sftp
+PortNumber=22
+FSProtocol=2
+Ftps=0
+RequestAuthentication=0
+LocalDirectory=%USERPROFILE%\Desktop
+RemoteDirectory=/
+SshHostKeyFingerprint=*
+SshSimple=1
+AuthKI=0
+AuthGSSAPI=0
+AuthAgent=0
+SftpServer=/usr/lib/openssh/sftp-server
+
+[Configuration]
+InitialDirectory=%USERPROFILE%\Desktop
+
+[Sessions]
+DefaultSettings=FIDS
+";
+
+                // Ensure directory exists
+                Directory.CreateDirectory(Path.GetDirectoryName(WINSCP_INI_PATH));
+
+                // Write the INI file
+                File.WriteAllText(WINSCP_INI_PATH, iniContent);
+
+                // Create process start info with automatic login
+                var processInfo = new ProcessStartInfo
+                {
+                    FileName = WINSCP_PATH,
+                    Arguments = $"/ini=\"{WINSCP_INI_PATH}\" /session=FIDS",
+                    UseShellExecute = true
+                };
+
+                // Start WinSCP
+                Process.Start(processInfo);
+                LogConnection(clientName, ipAddress, "Open WinSCP", "Started");
+
+                // Clean up INI file after a short delay
+                Task.Delay(5000).ContinueWith(t =>
+                {
+                    try
+                    {
+                        if (File.Exists(WINSCP_INI_PATH))
+                        {
+                            File.Delete(WINSCP_INI_PATH);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error cleaning up WinSCP INI file: {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error launching WinSCP: {ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                LogConnection(clientName, ipAddress, "Open WinSCP", "Failed", ex.Message);
+            }
+        }
+
+        // Modify the InitializeUI method to add the WinSCP button
+        // Find the section where you create the button panel and add this code:
+        // Modify the InitializeUI method to add the WinSCP button
+        private void ModifyButtonPanel()
+        {
+            // Find existing buttonsLayout in the InitializeUI method
+            var buttonsLayout = mainLayout.Controls.OfType<Panel>()
+                .First(p => p.Controls.OfType<FlowLayoutPanel>().Any())
+                .Controls.OfType<FlowLayoutPanel>()
+                .First();
+
+            // Create WinSCP button
+            winscpButton = new Button
+            {
+                Text = "Open in WinSCP",
+                Size = new Size(150, 30),
+                Enabled = false,
+                Anchor = AnchorStyles.None
+            };
+
+            winscpButton.Click += (s, e) =>
+            {
+                if (gridView.SelectedRows.Count == 1)
+                {
+                    var selectedRow = gridView.SelectedRows[0];
+                    string clientName = selectedRow.Cells["Name"].Value.ToString();
+                    string ipAddress = selectedRow.Cells["IP"].Value.ToString();
+                    OpenInWinSCP(clientName, ipAddress);
+                }
+            };
+
+            // Add the button to the layout
+            buttonsLayout.Controls.Add(winscpButton);
+        }
+
+        // Event handler for the WinSCP button
+        private void WinscpButton_Click(object sender, EventArgs e)
+        {
+            if (gridView.SelectedRows.Count == 1)
+            {
+                var selectedRow = gridView.SelectedRows[0];
+                string clientName = selectedRow.Cells["Name"].Value.ToString();
+                string ipAddress = selectedRow.Cells["IP"].Value.ToString();
+                OpenInWinSCP(clientName, ipAddress);
+            }
         }
     }
 
